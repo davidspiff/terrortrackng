@@ -1,0 +1,15 @@
+{
+  "name": "sentinel-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "scrape": "node index.js",
+    "import-csv": "node import-csv.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.47.0",
+    "cheerio": "^1.0.0",
+    "csv-parse": "^5.5.0",
+    "node-fetch": "^3.3.2"
+  }
+}

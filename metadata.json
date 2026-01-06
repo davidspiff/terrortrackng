@@ -1,0 +1,7 @@
+{
+  "name": "Sentinel Nigeria",
+  "description": "A civil security observatory providing hyper-local intelligence, real-time awareness, and data-driven safety analysis for Nigeria.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

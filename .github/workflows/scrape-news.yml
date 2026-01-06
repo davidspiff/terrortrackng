@@ -1,0 +1,38 @@
+name: Scrape Nigerian News
+
+on:
+  schedule:
+    # Run every 7 hours
+    - cron: '0 */7 * * *'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scraper/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./scraper
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CHUTES_API_KEY: ${{ secrets.CHUTES_API_KEY }}
+        run: node index.js
+        working-directory: ./scraper
+
+      - name: Log completion
+        run: echo "Scrape completed at $(date)"

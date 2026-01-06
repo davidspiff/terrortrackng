@@ -27,6 +27,7 @@ export interface DbIncident {
   incident_type: string;
   severity: string;
   sources: string[] | null;
+  source_url: string | null;
   verified: boolean;
   created_at: string;
   updated_at: string;
@@ -51,5 +52,6 @@ export function toIncident(db: DbIncident): Incident {
     type: db.incident_type as any,
     severity: db.severity as any,
     verified: db.verified,
+    source_url: db.source_url || undefined,
   };
 }

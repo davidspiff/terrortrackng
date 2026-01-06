@@ -31,6 +31,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CHUTES_API_KEY: ${{ secrets.CHUTES_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AI_PROVIDER: openrouter
         run: node index.js
         working-directory: ./scraper
 

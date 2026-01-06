@@ -1,5 +1,12 @@
+// AI Classification with multiple providers (Chutes + OpenRouter)
+// Switch between providers via AI_PROVIDER env var: 'chutes' or 'openrouter'
+
 const CHUTES_API_KEY = process.env.CHUTES_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const AI_PROVIDER = process.env.AI_PROVIDER || 'openrouter'; // Default to openrouter
+
 const CHUTES_API_URL = 'https://llm.chutes.ai/v1/chat/completions';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Nigerian state coordinates
 const STATE_COORDS = {
@@ -60,39 +67,107 @@ Return a JSON object with these fields:
 
 Only return valid JSON, no markdown or explanation.`;
 
-export async function classifyWithChutes(article) {
+// Retry with exponential backoff
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 2000) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRateLimit = error.message?.includes('429') || 
+                          error.message?.includes('402') || 
+                          error.message?.includes('rate') ||
+                          error.message?.includes('limit');
+      
+      if (isRateLimit && attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`  ⏳ Rate limited, retrying in ${delay/1000}s (attempt ${attempt + 2}/${maxRetries})...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+// Call Chutes API
+async function callChutes(article) {
   if (!CHUTES_API_KEY) {
-    console.warn('CHUTES_API_KEY not set, using fallback classification');
-    return fallbackClassify(article);
+    throw new Error('CHUTES_API_KEY not set');
   }
 
+  const response = await fetch(CHUTES_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${CHUTES_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'MiniMaxAI/MiniMax-M2.1-TEE',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Title: ${article.title}\n\nContent: ${article.content}\n\nURL: ${article.url}` }
+      ],
+      temperature: 0.1,
+      max_tokens: 30000,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Chutes API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content;
+}
+
+// Call OpenRouter API
+async function callOpenRouter(article) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY not set');
+  }
+
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'HTTP-Referer': 'https://terrortrackng.web.app',
+      'X-Title': 'Sentinel-NG Security Tracker',
+    },
+    body: JSON.stringify({
+      model: 'xiaomi/mimo-vl-7b-flash:free',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Title: ${article.title}\n\nContent: ${article.content}\n\nURL: ${article.url}` }
+      ],
+      temperature: 0.1,
+      max_tokens: 2000,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content;
+}
+
+// Main classification function
+export async function classifyWithChutes(article) {
+  const provider = AI_PROVIDER.toLowerCase();
+  
+  // Determine which API to use
+  const apiCall = provider === 'chutes' ? () => callChutes(article) : () => callOpenRouter(article);
+  const providerName = provider === 'chutes' ? 'Chutes' : 'OpenRouter';
+
   try {
-    const response = await fetch(CHUTES_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${CHUTES_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'MiniMaxAI/MiniMax-M2.1-TEE',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `Title: ${article.title}\n\nContent: ${article.content}\n\nURL: ${article.url}` }
-        ],
-        temperature: 0.1,
-        max_tokens: 30000,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Chutes API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    let content = data.choices?.[0]?.message?.content;
+    // Call API with retry logic
+    let content = await retryWithBackoff(apiCall);
     
     if (!content) {
-      throw new Error('Empty response from Chutes');
+      throw new Error(`Empty response from ${providerName}`);
     }
 
     // Strip markdown code blocks if present
@@ -110,7 +185,7 @@ export async function classifyWithChutes(article) {
     const parsed = JSON.parse(content);
     
     if (!parsed.is_security_incident) {
-      console.log(`Skipping non-security article: ${article.title.substring(0, 40)}...`);
+      console.log(`  ⊘ Not a security incident`);
       return null;
     }
 
@@ -137,11 +212,12 @@ export async function classifyWithChutes(article) {
       verified: false,
     };
   } catch (err) {
-    console.error('Chutes classification failed:', err.message);
+    console.log(`  ✗ ${providerName} classification failed: ${err.message}`);
     return fallbackClassify(article);
   }
 }
 
+// Fallback classification without AI
 function fallbackClassify(article) {
   const text = `${article.title} ${article.content}`.toLowerCase();
   

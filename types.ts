@@ -31,6 +31,7 @@ export interface Incident {
   severity: Severity;
   description: string;
   verified: boolean;
+  source_url?: string;
 }
 
 export interface FilterState {

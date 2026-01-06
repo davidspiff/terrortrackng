@@ -53,20 +53,34 @@ const STATE_COORDS = {
 // All Nigerian states for validation
 const NIGERIAN_STATES = Object.keys(STATE_COORDS);
 
-const SYSTEM_PROMPT = `You are an expert security analyst classifying Nigerian news articles. Your job is to determine if an article reports a NEW security incident or is about something else (follow-up, release, opinion, etc.).
+const SYSTEM_PROMPT = `You are an expert security analyst classifying Nigerian news articles. Your job is to identify ONLY articles that report NEW, ACTUAL violent incidents.
 
-CRITICAL RULES:
-1. ONLY classify as a security incident if it reports a NEW attack, killing, kidnapping, or violent event
-2. Articles about RELEASES, RESCUES, or FREED hostages are NOT new incidents - set is_new_incident to false
-3. Articles that are FOLLOW-UPS or UPDATES about previous incidents are NOT new - set is_new_incident to false
-4. Opinion pieces, analysis, or general security discussions are NOT incidents
-5. Extract the ACTUAL DATE the incident occurred (not the article publish date)
-6. Nigerian states MUST be one of: Abia, Adamawa, Akwa Ibom, Anambra, Bauchi, Bayelsa, Benue, Borno, Cross River, Delta, Ebonyi, Edo, Ekiti, Enugu, FCT, Gombe, Imo, Jigawa, Kaduna, Kano, Katsina, Kebbi, Kogi, Kwara, Lagos, Nasarawa, Niger, Ogun, Ondo, Osun, Oyo, Plateau, Rivers, Sokoto, Taraba, Yobe, Zamfara
+CRITICAL RULES - BE EXTREMELY STRICT:
+1. ONLY classify as a new incident if the article reports a SPECIFIC violent event that JUST HAPPENED
+2. Articles about CONDEMNATIONS, REACTIONS, STATEMENTS, or CALLS FOR ACTION are NOT incidents
+3. Articles about RELEASES, RESCUES, or FREED hostages are NOT new incidents
+4. Articles that are FOLLOW-UPS, UPDATES, or ANALYSIS of previous incidents are NOT new
+5. Opinion pieces, editorials, or general security discussions are NOT incidents
+6. Articles about ARRESTS or INVESTIGATIONS of past events are NOT new incidents
+7. Articles about GOVERNMENT RESPONSES or POLICY are NOT incidents
+8. Extract the ACTUAL DATE the incident occurred (not the article publish date)
+9. Nigerian states MUST be one of: Abia, Adamawa, Akwa Ibom, Anambra, Bauchi, Bayelsa, Benue, Borno, Cross River, Delta, Ebonyi, Edo, Ekiti, Enugu, FCT, Gombe, Imo, Jigawa, Kaduna, Kano, Katsina, Kebbi, Kogi, Kwara, Lagos, Nasarawa, Niger, Ogun, Ondo, Osun, Oyo, Plateau, Rivers, Sokoto, Taraba, Yobe, Zamfara
+10. An incident MUST have at least ONE of: fatalities > 0, injuries > 0, or kidnapped > 0
+
+EXAMPLES OF WHAT TO REJECT:
+- "Governor condemns attack" → REJECT (reaction, not incident)
+- "NBA condemns bandit attacks" → REJECT (statement, not incident)
+- "130 students released" → REJECT (release, not new incident)
+- "Police arrest suspects" → REJECT (arrest, not new incident)
+- "Analysis: Why attacks are increasing" → REJECT (analysis, not incident)
+- "Government vows to tackle insecurity" → REJECT (policy, not incident)
+
+ONLY ACCEPT articles that clearly describe a specific violent event with casualties.
 
 Return ONLY valid JSON (no markdown, no explanation):
 {
   "is_new_incident": boolean,
-  "rejection_reason": string or null (if not a new incident, explain why: "follow-up", "release/rescue", "opinion piece", "old news", etc.),
+  "rejection_reason": string or null (if rejected, explain: "condemnation/reaction", "release/rescue", "follow-up", "arrest/investigation", "opinion/analysis", "no casualties", "not specific event", etc.),
   "title": string (concise title, max 70 chars, NO HTML),
   "summary": string (2-3 sentence summary of what happened, NO HTML, NO links, plain text only),
   "incident_date": string (ISO date when incident ACTUALLY occurred, parse from article content),
@@ -249,6 +263,13 @@ export async function classifyWithChutes(article) {
     // Check for follow-up articles
     if (parsed.is_follow_up) {
       console.log(`  ⊘ Skipped: follow-up article`);
+      return null;
+    }
+
+    // CRITICAL: Must have at least one casualty
+    const totalCasualties = (parsed.fatalities || 0) + (parsed.injuries || 0) + (parsed.kidnapped || 0);
+    if (totalCasualties === 0) {
+      console.log(`  ⊘ Skipped: no casualties (0/0/0)`);
       return null;
     }
 

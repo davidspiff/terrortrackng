@@ -1,5 +1,5 @@
 const CHUTES_API_KEY = process.env.CHUTES_API_KEY;
-const CHUTES_API_URL = 'https://api.chutes.ai/v1/chat/completions';
+const CHUTES_API_URL = 'https://llm.chutes.ai/v1/chat/completions';
 
 // Nigerian state coordinates
 const STATE_COORDS = {
@@ -74,13 +74,13 @@ export async function classifyWithChutes(article) {
         'Authorization': `Bearer ${CHUTES_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-ai/DeepSeek-V3-0324',
+        model: 'MiniMaxAI/MiniMax-M2.1-TEE',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: `Title: ${article.title}\n\nContent: ${article.content}\n\nURL: ${article.url}` }
         ],
         temperature: 0.1,
-        max_tokens: 500,
+        max_tokens: 30000,
       }),
     });
 
@@ -89,11 +89,23 @@ export async function classifyWithChutes(article) {
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    let content = data.choices?.[0]?.message?.content;
     
     if (!content) {
       throw new Error('Empty response from Chutes');
     }
+
+    // Strip markdown code blocks if present
+    content = content.trim();
+    if (content.startsWith('```json')) {
+      content = content.slice(7);
+    } else if (content.startsWith('```')) {
+      content = content.slice(3);
+    }
+    if (content.endsWith('```')) {
+      content = content.slice(0, -3);
+    }
+    content = content.trim();
 
     const parsed = JSON.parse(content);
     
@@ -103,7 +115,8 @@ export async function classifyWithChutes(article) {
     }
 
     // Add coordinates
-    const coords = STATE_COORDS[parsed.state] || STATE_COORDS['FCT'];
+    const state = parsed.state || 'Unknown';
+    const coords = STATE_COORDS[state] || STATE_COORDS['FCT'];
     const lat = coords.lat + (Math.random() - 0.5) * 0.3;
     const lng = coords.lng + (Math.random() - 0.5) * 0.3;
 
@@ -111,7 +124,7 @@ export async function classifyWithChutes(article) {
       title: parsed.title,
       description: parsed.description,
       date: parsed.date || new Date().toISOString(),
-      state: parsed.state,
+      state: state,
       lga: parsed.lga || 'Unknown',
       lat,
       lng,
@@ -120,6 +133,7 @@ export async function classifyWithChutes(article) {
       kidnapped: parsed.kidnapped || 0,
       incident_type: parsed.incident_type,
       severity: parsed.severity,
+      source_url: article.url || null,
       verified: false,
     };
   } catch (err) {
@@ -191,6 +205,7 @@ function fallbackClassify(article) {
     kidnapped,
     incident_type,
     severity,
+    source_url: article.url || null,
     verified: false,
   };
 }

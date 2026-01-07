@@ -32,13 +32,13 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'map' | 'analytics'>('map');
   const { incidents, loading, error } = useIncidents();
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [showWelcome, setShowWelcome] = useState(true);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
   
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: '',
     minFatalities: 0,
-    dateRange: 'all',
+    dateRange: '7d',
     state: 'All',
     type: 'All',
     severity: 'All' as any
@@ -134,7 +134,7 @@ const App: React.FC = () => {
       <aside className="w-80 h-full bg-white/40 dark:bg-slate-950/40 border-r border-slate-200 dark:border-white/5 flex flex-col z-40 transition-colors">
         <div className="p-6 border-b border-slate-200 dark:border-white/5">
            <div className="flex items-center justify-between mb-6">
-             <h1 className="text-sm font-black tracking-widest uppercase text-slate-900 dark:text-white font-mono italic">SENTINEL_NG</h1>
+             <h1 className="text-sm font-black tracking-widest uppercase text-slate-900 dark:text-white font-mono italic">TERRORTRACK</h1>
              <div className="flex items-center gap-2">
                 <div className="status-pulse bg-emerald-500"></div>
                 <span className="text-[9px] text-emerald-500/60 font-mono uppercase tracking-widest font-bold">LIVE</span>
@@ -223,6 +223,16 @@ const App: React.FC = () => {
                     {Object.values(Severity).map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                </div>
+               <div>
+                  <label className="text-[9px] text-slate-500 font-mono uppercase tracking-widest mb-1.5 block">State</label>
+                  <select 
+                    className="w-full bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded py-2 px-3 text-[10px] font-bold text-slate-900 dark:text-white uppercase outline-none focus:border-emerald-500 transition-all cursor-pointer"
+                    value={filters.state}
+                    onChange={(e) => setFilters({...filters, state: e.target.value})}
+                  >
+                    {availableStates.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+               </div>
              </div>
            </section>
 
@@ -273,40 +283,31 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col relative">
         
         {/* HEADER */}
-        <header className="h-16 bg-white/40 dark:bg-slate-950/40 border-b border-slate-200 dark:border-white/5 flex items-center justify-between px-8 z-30 transition-colors">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-               <div className="w-8 h-8 rounded bg-emerald-500/5 flex items-center justify-center border border-emerald-500/20 text-emerald-500">
-                  <Grid size={18} />
+        <header className="h-14 bg-white/40 dark:bg-slate-950/40 border-b border-slate-200 dark:border-white/5 flex items-center justify-between px-6 z-30 transition-colors">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+               <div className="w-7 h-7 rounded bg-emerald-500/5 flex items-center justify-center border border-emerald-500/20 text-emerald-500">
+                  <Grid size={16} />
                </div>
                <div>
-                  <h2 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-widest">
+                  <h2 className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                     {activeTab === 'map' ? 'Tactical Command Grid' : 'Intelligence Analytics'}
                   </h2>
-                  <p className="text-[9px] text-slate-500 font-mono uppercase tracking-tighter">Sector Coverage: Nigeria Central</p>
+                  <p className="text-[8px] text-slate-500 font-mono uppercase">Nigeria Coverage</p>
                </div>
-            </div>
-            
-            {/* Ticker HUD */}
-            <div className="hidden lg:flex items-center gap-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/5 px-4 h-9 rounded-md overflow-hidden max-w-md">
-              <span className="text-[9px] font-bold text-emerald-500 whitespace-nowrap">FEED_SYNC:</span>
-              <div className="whitespace-nowrap animate-marquee text-[10px] text-slate-600 dark:text-slate-400 font-mono italic">
-                 {incidents.map(i => ` /// [${i.location.state}] ${i.title.toUpperCase()} — SEVERITY: ${i.severity.toUpperCase()} `).join('')}
-              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
              <button onClick={toggleTheme} className="p-2 text-slate-400 dark:text-slate-500 hover:text-emerald-500 transition-all flex items-center gap-2">
-                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                <span className="text-[10px] font-mono hidden xl:inline uppercase tracking-widest">{theme === 'dark' ? 'LIGHT_MODE' : 'DARK_MODE'}</span>
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
              </button>
              <button className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all">
-                <Bell size={18} />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-950 rounded-full"></span>
+                <Bell size={16} />
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 border border-white dark:border-slate-950 rounded-full"></span>
              </button>
-             <div className="w-px h-6 bg-slate-200 dark:bg-white/5 mx-2"></div>
-             <div className="flex items-center gap-3">
+             <div className="w-px h-5 bg-slate-200 dark:bg-white/5"></div>
+             <div className="flex items-center gap-2">
                <div className="text-right hidden sm:block">
                   <p className="text-[10px] font-bold text-slate-900 dark:text-white tracking-widest uppercase">Operator_01</p>
                   <p className="text-[9px] text-emerald-600 dark:text-emerald-500/60 font-mono uppercase">Clearance: Level 4</p>
@@ -335,17 +336,14 @@ const App: React.FC = () => {
                 { label: 'Fatalities', val: stats.fatalities, icon: AlertTriangle, color: 'text-red-500', bar: 'bg-red-500' },
                 { label: 'Injuries', val: stats.injuries, icon: PlusCircle, color: 'text-sky-500', bar: 'bg-sky-500' },
                 { label: 'Abducted', val: stats.kidnapped, icon: Users, color: 'text-amber-500', bar: 'bg-amber-500' },
-                { label: 'Coverage', val: '98.4%', icon: Radio, color: 'text-emerald-500', bar: 'bg-emerald-500' }
+                { label: 'Incidents', val: stats.total, icon: Radio, color: 'text-emerald-500', bar: 'bg-emerald-500' }
               ].map((kpi, idx) => (
-                <div key={idx} className="tactical-glass p-5 w-56 pointer-events-auto border-slate-200 dark:border-white/10">
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{kpi.label}</span>
-                    <kpi.icon size={14} className={kpi.color} />
+                <div key={idx} className="tactical-glass p-4 w-44 pointer-events-auto border-slate-200 dark:border-white/10">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase">{kpi.label}</span>
+                    <kpi.icon size={12} className={kpi.color} />
                   </div>
-                  <div className={`text-3xl font-black font-mono tracking-tighter ${kpi.color}`}>{kpi.val}</div>
-                  <div className="mt-3 h-1 bg-slate-200 dark:bg-white/5 rounded-full overflow-hidden">
-                    <div className={`h-full ${kpi.bar} opacity-60 animate-pulse`} style={{ width: '70%' }}></div>
-                  </div>
+                  <div className={`text-2xl font-black font-mono ${kpi.color}`}>{kpi.val.toLocaleString()}</div>
                 </div>
               ))}
             </div>
@@ -369,7 +367,7 @@ const App: React.FC = () => {
               <div className="w-20 h-20 bg-emerald-500/10 border-2 border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-500 mb-8 shadow-2xl shadow-emerald-500/20 rotate-45">
                  <Crosshair size={48} className="-rotate-45" />
               </div>
-              <h1 className="text-5xl font-black text-slate-900 dark:text-white italic tracking-tighter uppercase mb-2">SENTINEL-NG</h1>
+              <h1 className="text-5xl font-black text-slate-900 dark:text-white italic tracking-tighter uppercase mb-2">TERRORTRACK</h1>
               <p className="text-[11px] font-mono text-emerald-600 dark:text-emerald-500 tracking-[0.5em] uppercase font-bold">Nigeria Security Intelligence Network</p>
             </div>
             
@@ -401,17 +399,6 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
-      <style>{`
-        .animate-marquee {
-          display: inline-block;
-          animation: marquee 30s linear infinite;
-        }
-        @keyframes marquee {
-          0% { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
-        }
-      `}</style>
     </div>
   );
 };

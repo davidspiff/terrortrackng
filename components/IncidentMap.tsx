@@ -1,5 +1,5 @@
-import React from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip } from 'react-leaflet';
+import React, { useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { Incident } from '../types';
 import { NIGERIA_CENTER, NIGERIA_BOUNDS, ZOOM_LEVEL, SEVERITY_COLORS } from '../constants';
 
@@ -8,6 +8,22 @@ interface IncidentMapProps {
   onMarkerClick: (incident: Incident) => void;
   theme: 'dark' | 'light';
 }
+
+// Component to handle map resize
+const MapResizer: React.FC = () => {
+  const map = useMap();
+  
+  useEffect(() => {
+    // Invalidate size after a short delay to ensure container is rendered
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [map]);
+  
+  return null;
+};
 
 const IncidentMap: React.FC<IncidentMapProps> = ({ incidents, onMarkerClick, theme }) => {
   // Use reactive tile sets from CartoDB
@@ -33,6 +49,7 @@ const IncidentMap: React.FC<IncidentMapProps> = ({ incidents, onMarkerClick, the
           attribution='&copy; Sentinel Intelligence'
           url={tileUrl}
         />
+        <MapResizer />
 
         {incidents.map((inc) => (
           <CircleMarker

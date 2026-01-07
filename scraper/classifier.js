@@ -58,21 +58,28 @@ const STATE_COORDS = {
   'Zamfara': { lat: 12.1704, lng: 6.6600 },
 };
 
-const SYSTEM_PROMPT = `You are a Nigerian security analyst. Extract data from news articles about violent incidents.
+const SYSTEM_PROMPT = `You are a Nigerian security analyst tracking TERRORISM and BANDITRY incidents.
 
-YOUR TASK: Determine if this article reports a RECENT violent incident with casualties.
+YOUR TASK: Determine if this article reports a RECENT terrorist or bandit attack with casualties.
 
-ACCEPT articles that:
-- Report attacks, killings, kidnappings, bombings that happened recently
-- Have specific casualty numbers (killed, injured, abducted)
-- Mention specific locations in Nigeria
+ACCEPT articles about:
+- Boko Haram / ISWAP attacks
+- Bandit attacks (especially Northwest Nigeria - Zamfara, Katsina, Kaduna, Niger, Sokoto)
+- Unknown gunmen attacks (especially Southeast - IPOB/ESN related)
+- Fulani militia / herdsmen attacks on communities
+- Mass kidnappings by terrorist groups or bandits
+- IED/bomb attacks by insurgents
 
-REJECT articles that:
-- Are about government statements, reactions, condemnations
-- Report arrests, rescues, releases (law enforcement success stories)
-- Are analysis, opinion, or retrospective pieces
-- Have NO casualties (0 killed, 0 injured, 0 kidnapped)
-- Are about events outside Nigeria
+REJECT articles about:
+- Ordinary crime (armed robbery, fraud, domestic violence)
+- Cult clashes and gang violence
+- Individual kidnappings by common criminals
+- Government statements, reactions, condemnations
+- Arrests, rescues, releases (law enforcement success stories)
+- Analysis, opinion, or retrospective pieces
+- Accidents (road, boat, fire, building collapse)
+- Events outside Nigeria
+- Articles with NO casualties (0 killed, 0 injured, 0 kidnapped)
 
 LOCATION RULES:
 - "Niger State" = state: "Niger" (NOT Niger Republic)
@@ -93,21 +100,36 @@ Return ONLY valid JSON:
   "fatalities": number,
   "injuries": number,
   "kidnapped": number,
-  "incident_type": "Terrorism" | "Banditry" | "Unknown Gunmen" | "Cult Clash" | "Civil Unrest",
+  "incident_type": "Terrorism" | "Banditry" | "Unknown Gunmen" | "Herdsmen Attack" | "IPOB/ESN",
   "severity": "Low" | "Medium" | "High" | "Critical",
-  "perpetrators": string
+  "perpetrators": string (e.g., "Boko Haram", "Bandits", "Unknown Gunmen", "ISWAP", "Fulani Militia")
 }`;
 
-// Retry with exponential backoff
-async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 2000) {
+// Retry with exponential backoff - handles rate limits and empty responses
+async function retryWithBackoff(fn, maxRetries = 4, baseDelay = 3000) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      // Retry on empty response
+      if (!result || result.trim() === '') {
+        if (attempt < maxRetries - 1) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.log(`  ⏳ Empty response, retrying in ${delay/1000}s...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw new Error('Empty response after retries');
+      }
+      return result;
     } catch (error) {
-      const isRateLimit = error.message?.includes('429') || error.message?.includes('402');
-      if (isRateLimit && attempt < maxRetries - 1) {
+      const isRetryable = error.message?.includes('429') || 
+                          error.message?.includes('402') ||
+                          error.message?.includes('Empty response') ||
+                          error.message?.includes('timeout') ||
+                          error.message?.includes('ECONNRESET');
+      if (isRetryable && attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt);
-        console.log(`  ⏳ Rate limited, retrying in ${delay/1000}s...`);
+        console.log(`  ⏳ ${error.message.substring(0, 30)}... retrying in ${delay/1000}s...`);
         await new Promise(r => setTimeout(r, delay));
       } else {
         throw error;

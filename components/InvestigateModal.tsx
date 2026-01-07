@@ -38,7 +38,7 @@ const InvestigateModal: React.FC<InvestigateModalProps> = ({ incident, onClose }
       <div 
         className="tactical-glass w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden border-emerald-500/20 max-h-[90vh] flex flex-col transition-colors"
         onClick={(e) => e.stopPropagation()}
-        
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 transition-colors">
           <div className="flex items-center gap-3">

@@ -81,12 +81,12 @@ export const MOCK_INCIDENTS: Incident[] = [
   }
 ];
 
-export const NIGERIA_CENTER: [number, number] = [9.0820, 8.6753];
+export const NIGERIA_CENTER: [number, number] = [9.5, 8.0];
 export const NIGERIA_BOUNDS: [[number, number], [number, number]] = [
     [4.0, 2.5],
     [14.0, 15.0]
 ];
-export const ZOOM_LEVEL = 6.4;
+export const ZOOM_LEVEL = 6;
 
 export const INCIDENT_COLORS: Record<IncidentType, string> = {
   [IncidentType.TERRORISM]: '#ef4444',     // Crimson

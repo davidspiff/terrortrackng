@@ -1,4 +1,4 @@
-# SENTINEL-NG 🛡️
+# TERRORTRACK 🛡️
 
 **Nigeria Security Intelligence Dashboard**
 

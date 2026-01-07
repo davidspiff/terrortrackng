@@ -1,10 +1,11 @@
 // Main scraper - runs every 7 hours via GitHub Actions
-// Uses Google News RSS to find articles from Punch & Vanguard, then fetches full content
+// Uses Vanguard RSS feeds with keyword pre-filtering for efficiency
 
 import { createClient } from '@supabase/supabase-js';
 import * as cheerio from 'cheerio';
 import { classifyWithChutes } from './classifier.js';
 import { isDuplicate } from './deduplicator.js';
+import { isSecurityIncident } from './keywords.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
@@ -15,164 +16,136 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-// Search queries for Google News - focused on security incidents
-const SEARCH_QUERIES = [
-  'site:punchng.com killed attack Nigeria',
-  'site:punchng.com bandits gunmen Nigeria',
-  'site:punchng.com kidnapped abducted Nigeria',
-  'site:punchng.com Boko Haram ISWAP',
-  'site:vanguardngr.com killed attack Nigeria',
-  'site:vanguardngr.com bandits gunmen Nigeria',
-  'site:vanguardngr.com kidnapped abducted Nigeria',
-  'site:vanguardngr.com Boko Haram ISWAP',
-];
+// Parse RSS XML and extract articles
+function parseRssFeed(xml) {
+  const articles = [];
+  const $ = cheerio.load(xml, { xmlMode: true });
 
-// Fetch articles from Google News RSS
-async function fetchGoogleNews(query) {
-  // Get articles from last 3 days
-  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  const dateStr = threeDaysAgo.toISOString().split('T')[0];
-  
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}+after:${dateStr}&hl=en-NG&gl=NG&ceid=NG:en`;
-  
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
+  $('item').each((_, item) => {
+    const $item = $(item);
     
-    if (!response.ok) return [];
+    const title = $item.find('title').text().trim();
+    const link = $item.find('link').text().trim();
+    const pubDate = $item.find('pubDate').text().trim();
+    const contentEncoded = $item.find('content\\:encoded, encoded').text().trim();
+    const description = $item.find('description').text().trim();
     
-    const xml = await response.text();
-    const items = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-    
-    while ((match = itemRegex.exec(xml)) !== null) {
-      const itemXml = match[1];
-      const title = itemXml.match(/<title>(.*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[(.*?)\]\]>/, '$1') || '';
-      const link = itemXml.match(/<link>(.*?)<\/link>/)?.[1] || '';
-      const pubDate = itemXml.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || '';
-      
-      // Extract actual source URL from Google redirect
-      let sourceUrl = link;
-      if (link.includes('news.google.com')) {
-        // Google News links redirect - we'll resolve them later
-        sourceUrl = link;
-      }
-      
-      items.push({
-        title: title.trim(),
-        url: sourceUrl,
-        date: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+    if (title && link) {
+      articles.push({
+        title,
+        link,
+        pubDate: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+        content: contentEncoded || description || '',
       });
     }
-    
-    return items;
-  } catch (err) {
-    console.error(`  Error searching "${query}":`, err.message);
-    return [];
-  }
+  });
+
+  return articles;
 }
 
-// Fetch full article content from Punch
-async function fetchPunchArticle(url) {
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      redirect: 'follow',
-    });
-    
-    if (!response.ok) return null;
-    
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    
-    const title = $('h1').first().text().trim();
-    const paragraphs = [];
-    $('.entry-content p, .post-content p, article p').each((_, el) => {
-      const text = $(el).text().trim();
-      if (text.length > 30 && !text.includes('PUNCH') && !text.includes('READ ALSO')) {
-        paragraphs.push(text);
-      }
-    });
-    
-    return {
-      title,
-      content: paragraphs.slice(0, 15).join('\n\n'),
-    };
-  } catch (err) {
-    return null;
-  }
-}
-
-// Fetch full article content from Vanguard
-async function fetchVanguardArticle(url) {
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      redirect: 'follow',
-    });
-    
-    if (!response.ok) return null;
-    
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    
-    const title = $('h1.entry-title, h1').first().text().trim();
-    const paragraphs = [];
-    $('.entry-content p, article p').each((_, el) => {
-      const text = $(el).text().trim();
-      if (text.length > 30 && !text.includes('Vanguard') && !text.includes('READ ALSO')) {
-        paragraphs.push(text);
-      }
-    });
-    
-    return {
-      title,
-      content: paragraphs.slice(0, 15).join('\n\n'),
-    };
-  } catch (err) {
-    return null;
-  }
-}
-
-// Resolve Google News redirect URL to actual article URL
-async function resolveGoogleUrl(googleUrl) {
-  try {
-    // Google News URLs contain the actual URL encoded in the path
-    // Format: https://news.google.com/rss/articles/CBMi...
-    // We need to follow the redirect
-    
-    const response = await fetch(googleUrl, {
-      headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
-      },
-      redirect: 'follow',
-    });
-    
-    // The final URL after redirects is the actual article
-    const finalUrl = response.url;
-    
-    if (finalUrl.includes('punchng.com') || finalUrl.includes('vanguardngr.com')) {
-      return finalUrl;
+// Clean HTML from content
+function cleanContent(html) {
+  if (!html) return '';
+  const $ = cheerio.load(html);
+  $('script, style, iframe, .sharedaddy, .jp-relatedposts').remove();
+  
+  const paragraphs = [];
+  $('p').each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length > 30 && !text.includes('READ ALSO') && !text.includes('Vanguard News')) {
+      paragraphs.push(text);
     }
-    
-    // If still on Google, try to extract from page content
-    const html = await response.text();
-    
-    // Look for the actual article URL in the page
-    const punchMatch = html.match(/https:\/\/punchng\.com\/[^"'\s<>]+/);
-    if (punchMatch) return punchMatch[0];
-    
-    const vanguardMatch = html.match(/https:\/\/www\.vanguardngr\.com\/[^"'\s<>]+/);
-    if (vanguardMatch) return vanguardMatch[0];
-    
-    return null;
-  } catch (err) {
-    return null;
+  });
+  
+  if (paragraphs.length === 0) {
+    return $.text().replace(/\s+/g, ' ').trim().substring(0, 2000);
   }
+  
+  return paragraphs.slice(0, 15).join('\n\n');
+}
+
+// Scrape Vanguard RSS for a specific date
+async function scrapeVanguardByDate(dateStr) {
+  const feedBaseUrl = `https://www.vanguardngr.com/${dateStr}/feed/`;
+  const allArticles = [];
+  const seenLinks = new Set();
+  let page = 1;
+
+  console.log(`  📅 Scraping Vanguard for ${dateStr}...`);
+
+  while (true) {
+    const feedUrl = page === 1 ? feedBaseUrl : `${feedBaseUrl}?paged=${page}`;
+    
+    try {
+      const response = await fetch(feedUrl, {
+        headers: { 'User-Agent': USER_AGENT },
+      });
+
+      if (response.status === 404) {
+        console.log(`  ✓ Finished at page ${page - 1}`);
+        break;
+      }
+
+      if (!response.ok) {
+        console.log(`  ⚠ Page ${page} returned ${response.status}`);
+        break;
+      }
+
+      const xml = await response.text();
+      const articles = parseRssFeed(xml);
+
+      if (articles.length === 0) {
+        console.log(`  ✓ Finished at page ${page} (empty)`);
+        break;
+      }
+
+      let newCount = 0;
+      for (const article of articles) {
+        if (!seenLinks.has(article.link)) {
+          seenLinks.add(article.link);
+          allArticles.push(article);
+          newCount++;
+        }
+      }
+
+      console.log(`  📄 Page ${page}: ${newCount} new articles`);
+      page++;
+
+      await new Promise(r => setTimeout(r, 1000));
+
+    } catch (err) {
+      console.error(`  ✗ Error on page ${page}: ${err.message}`);
+      break;
+    }
+  }
+
+  return allArticles;
+}
+
+// Scrape last N days
+async function scrapeVanguardRecent(days = 1) {
+  const allArticles = [];
+  
+  for (let i = 0; i < days; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}/${month}/${day}`;
+    
+    const articles = await scrapeVanguardByDate(dateStr);
+    allArticles.push(...articles);
+    
+    if (i < days - 1) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  
+  return allArticles;
 }
 
 async function getRecentIncidents(days = 7) {
@@ -213,7 +186,7 @@ async function saveIncident(incident, existingIncidents) {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log('SENTINEL-NG SCRAPER (Punch + Vanguard via Google News)');
+  console.log('SENTINEL-NG SCRAPER (Vanguard RSS + Keyword Filter)');
   console.log('Started:', new Date().toISOString());
   console.log('='.repeat(60));
   
@@ -222,68 +195,45 @@ async function main() {
   const existingIncidents = await getRecentIncidents(7);
   console.log(`   Found ${existingIncidents.length} incidents from last 7 days\n`);
   
-  // Step 1: Search Google News for articles from Punch & Vanguard
-  console.log('🔍 Searching Google News for Punch & Vanguard articles...');
-  const allArticles = new Map(); // Use Map to dedupe by URL
+  // Step 1: Scrape Vanguard RSS for last 2 days (covers 7-hour gap with buffer)
+  console.log('📰 Scraping Vanguard RSS feeds...');
+  const rawArticles = await scrapeVanguardRecent(2);
   
-  for (const query of SEARCH_QUERIES) {
-    const articles = await fetchGoogleNews(query);
-    console.log(`   "${query.substring(0, 40)}...": ${articles.length} results`);
-    
-    for (const article of articles) {
-      if (!allArticles.has(article.url)) {
-        allArticles.set(article.url, article);
-      }
-    }
-    
-    await new Promise(r => setTimeout(r, 500));
-  }
+  // Convert to standard format
+  const allArticles = rawArticles.map(article => ({
+    title: article.title,
+    content: cleanContent(article.content),
+    url: article.link,
+    date: article.pubDate,
+    source: 'Vanguard',
+  })).filter(a => a.content.length > 100);
+
+  console.log(`\n📊 Total articles: ${allArticles.length}`);
   
-  console.log(`\n📰 Found ${allArticles.size} unique articles\n`);
+  // Step 2: Pre-filter using keywords
+  const securityArticles = allArticles.filter(article => {
+    const text = `${article.title} ${article.content}`;
+    return isSecurityIncident(text);
+  });
   
-  // Step 2: Fetch full content and process
-  console.log('🤖 Fetching full articles and classifying...\n');
+  console.log(`🔍 Security-related: ${securityArticles.length} (filtered from ${allArticles.length})\n`);
   
-  let stats = { processed: 0, saved: 0, duplicates: 0, errors: 0, skipped: 0 };
-  const articles = [...allArticles.values()];
+  // Step 3: Classify and save
+  console.log('🤖 Classifying articles...\n');
   
-  for (const article of articles) {
+  let stats = { processed: 0, saved: 0, duplicates: 0, skipped: 0, errors: 0 };
+  
+  for (const article of securityArticles) {
     stats.processed++;
-    console.log(`[${stats.processed}/${articles.length}] ${article.title.substring(0, 55)}...`);
+    console.log(`[${stats.processed}/${securityArticles.length}] ${article.title.substring(0, 55)}...`);
     
     try {
-      // Resolve Google redirect URL
-      let realUrl = article.url;
-      if (article.url.includes('news.google.com')) {
-        realUrl = await resolveGoogleUrl(article.url);
-        await new Promise(r => setTimeout(r, 300));
-      }
-      
-      // Determine source and fetch full content
-      let fullArticle = null;
-      let source = 'Unknown';
-      
-      if (realUrl.includes('punchng.com')) {
-        source = 'Punch';
-        fullArticle = await fetchPunchArticle(realUrl);
-      } else if (realUrl.includes('vanguardngr.com')) {
-        source = 'Vanguard';
-        fullArticle = await fetchVanguardArticle(realUrl);
-      }
-      
-      if (!fullArticle || !fullArticle.content || fullArticle.content.length < 100) {
-        console.log(`  ⏭ Could not fetch article content`);
-        stats.skipped++;
-        continue;
-      }
-      
-      // Classify with AI
       const incident = await classifyWithChutes({
-        title: fullArticle.title || article.title,
-        content: fullArticle.content,
-        url: realUrl,
+        title: article.title,
+        content: article.content,
+        url: article.url,
         date: article.date,
-        source,
+        source: 'Vanguard',
       });
       
       if (!incident) {
@@ -291,11 +241,10 @@ async function main() {
         continue;
       }
       
-      // Save to database
       const result = await saveIncident({
         ...incident,
-        source_url: realUrl,
-        sources: [source],
+        source_url: article.url,
+        sources: ['Vanguard'],
       }, existingIncidents);
       
       if (result.saved) {
@@ -312,7 +261,7 @@ async function main() {
       console.log(`  ✗ Error: ${err.message}`);
     }
     
-    // Rate limiting
+    // Rate limiting for AI API
     await new Promise(r => setTimeout(r, 2000));
   }
   
@@ -320,7 +269,8 @@ async function main() {
   console.log('\n' + '='.repeat(60));
   console.log('SCRAPE COMPLETE');
   console.log('='.repeat(60));
-  console.log(`📊 Articles processed: ${stats.processed}`);
+  console.log(`📰 Articles scraped: ${allArticles.length}`);
+  console.log(`🔍 Security filtered: ${securityArticles.length}`);
   console.log(`✓  New incidents saved: ${stats.saved}`);
   console.log(`⏭  Duplicates skipped: ${stats.duplicates}`);
   console.log(`⊘  Non-incidents skipped: ${stats.skipped}`);

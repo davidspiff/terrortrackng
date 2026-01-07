@@ -1,8 +1,10 @@
 // Vanguard RSS Feed Scraper
 // Uses paginated daily RSS feeds: https://www.vanguardngr.com/YYYY/MM/DD/feed/?paged=N
 // Stops when hitting 404 (no more pages)
+// Pre-filters articles using security keywords before AI classification
 
 import * as cheerio from 'cheerio';
+import { isSecurityIncident } from '../keywords.js';
 
 const BASE_URL = 'https://www.vanguardngr.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
@@ -155,6 +157,14 @@ export async function scrapeVanguardRecent(days = 3) {
   return allArticles;
 }
 
+// Pre-filter articles using keywords (fast, no AI needed)
+export function filterSecurityArticles(articles) {
+  return articles.filter(article => {
+    const text = `${article.title} ${article.content}`.toLowerCase();
+    return isSecurityIncident(text);
+  });
+}
+
 // Main export - scrapes recent articles and returns in standard format
 export async function scrapeVanguard() {
   console.log('🗞️  Vanguard RSS Scraper');
@@ -163,7 +173,7 @@ export async function scrapeVanguard() {
   console.log(`  📰 Total: ${rawArticles.length} articles from last 3 days`);
   
   // Convert to standard format with cleaned content
-  const articles = rawArticles.map(article => ({
+  const allArticles = rawArticles.map(article => ({
     title: article.title,
     content: cleanContent(article.content),
     url: article.link,
@@ -171,6 +181,9 @@ export async function scrapeVanguard() {
     source: 'Vanguard',
   })).filter(a => a.content.length > 100);
 
-  console.log(`  ✓ ${articles.length} articles with sufficient content`);
-  return articles;
+  // Pre-filter using keywords - only send relevant articles to AI
+  const securityArticles = filterSecurityArticles(allArticles);
+  
+  console.log(`  🔍 Filtered: ${securityArticles.length}/${allArticles.length} potentially security-related`);
+  return securityArticles;
 }

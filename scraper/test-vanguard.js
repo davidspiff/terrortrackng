@@ -1,10 +1,12 @@
 // Test script for new Vanguard RSS scraper
 // Deletes last 20 days of data, then scrapes and imports fresh
+// Uses keyword pre-filtering to reduce AI API calls
 
 import { createClient } from '@supabase/supabase-js';
-import { scrapeVanguardByDate, scrapeVanguardRecent } from './sources/vanguard.js';
+import { scrapeVanguardByDate, filterSecurityArticles } from './sources/vanguard.js';
 import { classifyWithChutes } from './classifier.js';
 import { isDuplicate } from './deduplicator.js';
+import { isSecurityIncident } from './keywords.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
@@ -103,18 +105,26 @@ async function main() {
     await new Promise(r => setTimeout(r, 1500));
   }
   
-  console.log(`\n📊 Total articles scraped: ${allArticles.length}\n`);
+  console.log(`\n📊 Total articles scraped: ${allArticles.length}`);
+  
+  // Pre-filter using keywords - dramatically reduces AI calls
+  const securityArticles = allArticles.filter(article => {
+    const text = `${article.title} ${article.content}`;
+    return isSecurityIncident(text);
+  });
+  
+  console.log(`🔍 Security-related articles: ${securityArticles.length} (filtered from ${allArticles.length})\n`);
   
   // Step 3: Get existing incidents for dedup
   const existingIncidents = await getRecentIncidents(30);
   console.log(`📋 Existing incidents in DB: ${existingIncidents.length}\n`);
   
-  // Step 4: Classify and save
-  console.log('🤖 Classifying articles...\n');
+  // Step 4: Classify and save (only filtered articles)
+  console.log('🤖 Classifying security articles...\n');
   
   let stats = { processed: 0, saved: 0, duplicates: 0, skipped: 0, errors: 0 };
   
-  for (const article of allArticles) {
+  for (const article of securityArticles) {
     stats.processed++;
     
     // Skip if content too short
@@ -123,7 +133,7 @@ async function main() {
       continue;
     }
     
-    console.log(`[${stats.processed}/${allArticles.length}] ${article.title.substring(0, 55)}...`);
+    console.log(`[${stats.processed}/${securityArticles.length}] ${article.title.substring(0, 55)}...`);
     
     try {
       // Clean content for classification

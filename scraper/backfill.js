@@ -177,8 +177,8 @@ async function main() {
       console.log(`  ✗ Error: ${err.message}`);
     }
     
-    // Rate limiting
-    await new Promise(r => setTimeout(r, 1500));
+    // Rate limiting - longer delay to avoid rate limits
+    await new Promise(r => setTimeout(r, 3000));
   }
   
   // Summary

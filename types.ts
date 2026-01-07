@@ -37,7 +37,9 @@ export interface Incident {
 export interface FilterState {
   searchQuery: string;
   minFatalities: number;
-  dateRange: '24h' | '7d' | '30d' | 'all';
+  dateRange: '24h' | '7d' | '30d' | '3m' | '1y' | 'custom' | 'all';
+  customDateStart?: string;
+  customDateEnd?: string;
   state: string | 'All';
   type: IncidentType | 'All';
   severity: Severity | 'All';

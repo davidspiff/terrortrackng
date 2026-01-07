@@ -31,8 +31,13 @@ const InvestigateModal: React.FC<InvestigateModalProps> = ({ incident, onClose }
   const sourceUrl = (incident as any).source_url;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-      <div className="tactical-glass w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden border-emerald-500/20 max-h-[90vh] flex flex-col transition-colors">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-300"
+      onClick={onClose}
+    >
+      <div 
+        className="tactical-glass w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden border-emerald-500/20 max-h-[90vh] flex flex-col transition-colors"
+        onClick={(e) => e.stopPropagation()}
         
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 transition-colors">

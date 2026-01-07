@@ -1,5 +1,5 @@
-// Smart AI Classification with context-aware duplicate detection
-// Handles follow-up articles, releases, and extracts actual incident dates
+// Smart AI Classification with proper location extraction
+// Uses Gemini for better understanding of Nigerian geography
 
 const CHUTES_API_KEY = process.env.CHUTES_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -8,7 +8,16 @@ const AI_PROVIDER = process.env.AI_PROVIDER || 'openrouter';
 const CHUTES_API_URL = 'https://llm.chutes.ai/v1/chat/completions';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Nigerian state coordinates
+// Nigerian states with their LGAs for validation
+const NIGERIAN_STATES = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
+  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo',
+  'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos',
+  'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers',
+  'Sokoto', 'Taraba', 'Yobe', 'Zamfara'
+];
+
+// State coordinates
 const STATE_COORDS = {
   'Abia': { lat: 5.4527, lng: 7.5248 },
   'Adamawa': { lat: 9.3265, lng: 12.3984 },
@@ -25,7 +34,6 @@ const STATE_COORDS = {
   'Ekiti': { lat: 7.7190, lng: 5.3110 },
   'Enugu': { lat: 6.4584, lng: 7.5464 },
   'FCT': { lat: 9.0765, lng: 7.3986 },
-  'Abuja': { lat: 9.0765, lng: 7.3986 },
   'Gombe': { lat: 10.2897, lng: 11.1673 },
   'Imo': { lat: 5.5720, lng: 7.0588 },
   'Jigawa': { lat: 12.2280, lng: 9.5616 },
@@ -50,50 +58,44 @@ const STATE_COORDS = {
   'Zamfara': { lat: 12.1704, lng: 6.6600 },
 };
 
-// All Nigerian states for validation
-const NIGERIAN_STATES = Object.keys(STATE_COORDS);
+const SYSTEM_PROMPT = `You are a Nigerian security analyst. Extract data from news articles about violent incidents.
 
-const SYSTEM_PROMPT = `You are an expert security analyst classifying Nigerian news articles. Your job is to identify ONLY articles that report NEW, ACTUAL violent incidents.
+YOUR TASK: Determine if this article reports a RECENT violent incident with casualties.
 
-CRITICAL RULES - BE EXTREMELY STRICT:
-1. ONLY classify as a new incident if the article reports a SPECIFIC violent event that JUST HAPPENED
-2. Articles about CONDEMNATIONS, REACTIONS, STATEMENTS, or CALLS FOR ACTION are NOT incidents
-3. Articles about RELEASES, RESCUES, or FREED hostages are NOT new incidents
-4. Articles that are FOLLOW-UPS, UPDATES, or ANALYSIS of previous incidents are NOT new
-5. Opinion pieces, editorials, or general security discussions are NOT incidents
-6. Articles about ARRESTS or INVESTIGATIONS of past events are NOT new incidents
-7. Articles about GOVERNMENT RESPONSES or POLICY are NOT incidents
-8. Extract the ACTUAL DATE the incident occurred (not the article publish date)
-9. Nigerian states MUST be one of: Abia, Adamawa, Akwa Ibom, Anambra, Bauchi, Bayelsa, Benue, Borno, Cross River, Delta, Ebonyi, Edo, Ekiti, Enugu, FCT, Gombe, Imo, Jigawa, Kaduna, Kano, Katsina, Kebbi, Kogi, Kwara, Lagos, Nasarawa, Niger, Ogun, Ondo, Osun, Oyo, Plateau, Rivers, Sokoto, Taraba, Yobe, Zamfara
-10. An incident MUST have at least ONE of: fatalities > 0, injuries > 0, or kidnapped > 0
+ACCEPT articles that:
+- Report attacks, killings, kidnappings, bombings that happened recently
+- Have specific casualty numbers (killed, injured, abducted)
+- Mention specific locations in Nigeria
 
-EXAMPLES OF WHAT TO REJECT:
-- "Governor condemns attack" → REJECT (reaction, not incident)
-- "NBA condemns bandit attacks" → REJECT (statement, not incident)
-- "130 students released" → REJECT (release, not new incident)
-- "Police arrest suspects" → REJECT (arrest, not new incident)
-- "Analysis: Why attacks are increasing" → REJECT (analysis, not incident)
-- "Government vows to tackle insecurity" → REJECT (policy, not incident)
+REJECT articles that:
+- Are about government statements, reactions, condemnations
+- Report arrests, rescues, releases (law enforcement success stories)
+- Are analysis, opinion, or retrospective pieces
+- Have NO casualties (0 killed, 0 injured, 0 kidnapped)
+- Are about events outside Nigeria
 
-ONLY ACCEPT articles that clearly describe a specific violent event with casualties.
+LOCATION RULES:
+- "Niger State" = state: "Niger" (NOT Niger Republic)
+- Infer from context: Boko Haram/ISWAP → likely Borno/Adamawa/Yobe
+- Bandits → likely Zamfara/Kaduna/Katsina/Niger
 
-Return ONLY valid JSON (no markdown, no explanation):
+Nigerian states: ${NIGERIAN_STATES.join(', ')}
+
+Return ONLY valid JSON:
 {
-  "is_new_incident": boolean,
-  "rejection_reason": string or null (if rejected, explain: "condemnation/reaction", "release/rescue", "follow-up", "arrest/investigation", "opinion/analysis", "no casualties", "not specific event", etc.),
-  "title": string (concise title, max 70 chars, NO HTML),
-  "summary": string (2-3 sentence summary of what happened, NO HTML, NO links, plain text only),
-  "incident_date": string (ISO date when incident ACTUALLY occurred, parse from article content),
-  "state": string (Nigerian state from the list above, or "Unknown"),
-  "lga": string (Local Government Area if mentioned),
-  "town_village": string (specific town/village name if mentioned),
-  "fatalities": number (people killed, 0 if none or unknown),
-  "injuries": number (people injured, 0 if none or unknown),
-  "kidnapped": number (people abducted/kidnapped, 0 if none - do NOT count released people),
-  "incident_type": string (one of: "Terrorism", "Banditry", "Civil Unrest", "Unknown Gunmen", "Police Clash", "Cult Clash"),
-  "severity": string (one of: "Low", "Medium", "High", "Critical"),
-  "perpetrators": string (who did it: "Boko Haram", "ISWAP", "Bandits", "Unknown Gunmen", "Fulani Militia", etc.),
-  "is_follow_up": boolean (true if this is reporting on a previous incident)
+  "is_valid_incident": boolean,
+  "rejection_reason": string or null,
+  "title": string (max 70 chars),
+  "summary": string (2-3 sentences about what happened),
+  "incident_date": string (ISO date),
+  "state": string (Nigerian state),
+  "lga": string (town/village),
+  "fatalities": number,
+  "injuries": number,
+  "kidnapped": number,
+  "incident_type": "Terrorism" | "Banditry" | "Unknown Gunmen" | "Cult Clash" | "Civil Unrest",
+  "severity": "Low" | "Medium" | "High" | "Critical",
+  "perpetrators": string
 }`;
 
 // Retry with exponential backoff
@@ -102,14 +104,10 @@ async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 2000) {
     try {
       return await fn();
     } catch (error) {
-      const isRateLimit = error.message?.includes('429') || 
-                          error.message?.includes('402') || 
-                          error.message?.includes('rate') ||
-                          error.message?.includes('limit');
-      
+      const isRateLimit = error.message?.includes('429') || error.message?.includes('402');
       if (isRateLimit && attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt);
-        console.log(`  ⏳ Rate limited, retrying in ${delay/1000}s (attempt ${attempt + 2}/${maxRetries})...`);
+        console.log(`  ⏳ Rate limited, retrying in ${delay/1000}s...`);
         await new Promise(r => setTimeout(r, delay));
       } else {
         throw error;
@@ -122,15 +120,119 @@ async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 2000) {
 function cleanHtml(text) {
   if (!text) return '';
   return text
-    .replace(/<[^>]*>/g, '') // Remove HTML tags
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/https?:\/\/[^\s]+/g, '') // Remove URLs
+    .replace(/<[^>]*>/g, '')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/https?:\/\/[^\s]+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Extract state from text as fallback
+function extractStateFromText(text) {
+  const lowerText = text.toLowerCase();
+  
+  // Check for explicit state mentions
+  for (const state of NIGERIAN_STATES) {
+    const patterns = [
+      new RegExp(`\\b${state.toLowerCase()}\\s+state\\b`),
+      new RegExp(`\\bin\\s+${state.toLowerCase()}\\b`),
+      new RegExp(`\\b${state.toLowerCase()}\\s+community\\b`),
+      new RegExp(`\\b${state.toLowerCase()}\\s+village\\b`),
+    ];
+    
+    if (patterns.some(p => p.test(lowerText))) {
+      return state;
+    }
+  }
+  
+  // Check for state name alone
+  for (const state of NIGERIAN_STATES) {
+    if (lowerText.includes(state.toLowerCase())) {
+      // Avoid false positives
+      if (state === 'Niger' && !lowerText.includes('niger state') && !lowerText.includes('niger community')) {
+        continue; // Could be Niger Republic
+      }
+      return state;
+    }
+  }
+  
+  // Infer from perpetrators/context
+  if (lowerText.includes('boko haram') || lowerText.includes('iswap')) {
+    if (lowerText.includes('adamawa')) return 'Adamawa';
+    if (lowerText.includes('yobe')) return 'Yobe';
+    return 'Borno'; // Most likely
+  }
+  
+  if (lowerText.includes('bandit') || lowerText.includes('cattle rustl')) {
+    if (lowerText.includes('zamfara')) return 'Zamfara';
+    if (lowerText.includes('katsina')) return 'Katsina';
+    if (lowerText.includes('kaduna')) return 'Kaduna';
+    if (lowerText.includes('niger')) return 'Niger';
+  }
+  
+  return null;
+}
+
+// Validate and fix state
+function validateState(state, articleText) {
+  if (!state || state === 'Unknown') {
+    const extracted = extractStateFromText(articleText);
+    if (extracted) return extracted;
+    return 'Unknown';
+  }
+  
+  // Fix common issues
+  const normalized = state.trim().replace(/\s+state$/i, '');
+  
+  // Direct match
+  const found = NIGERIAN_STATES.find(s => s.toLowerCase() === normalized.toLowerCase());
+  if (found) return found;
+  
+  // Handle "Niger State" being confused with Niger Republic
+  if (normalized.toLowerCase() === 'niger') {
+    return 'Niger';
+  }
+  
+  // Fallback to text extraction
+  const extracted = extractStateFromText(articleText);
+  if (extracted) return extracted;
+  
+  return 'Unknown';
+}
+
+// Call OpenRouter API
+async function callOpenRouter(article) {
+  if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY not set');
+
+  const cleanContent = cleanHtml(article.content);
+  const cleanTitle = cleanHtml(article.title);
+
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'HTTP-Referer': 'https://terrortrackng.web.app',
+      'X-Title': 'Sentinel-NG',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Classify this Nigerian news article:\n\nTitle: ${cleanTitle}\n\nContent: ${cleanContent}\n\nPublish Date: ${article.date}` }
+      ],
+      temperature: 0.1,
+      max_tokens: 1500,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`OpenRouter error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content;
 }
 
 // Call Chutes API
@@ -150,87 +252,16 @@ async function callChutes(article) {
       model: 'MiniMaxAI/MiniMax-M2.1-TEE',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Analyze this Nigerian news article:\n\nTitle: ${cleanTitle}\n\nContent: ${cleanContent}\n\nArticle Date: ${article.date}` }
+        { role: 'user', content: `Classify this Nigerian news article:\n\nTitle: ${cleanTitle}\n\nContent: ${cleanContent}\n\nPublish Date: ${article.date}` }
       ],
       temperature: 0.1,
-      max_tokens: 2000,
+      max_tokens: 1500,
     }),
   });
 
-  if (!response.ok) throw new Error(`Chutes API error: ${response.status}`);
+  if (!response.ok) throw new Error(`Chutes error: ${response.status}`);
   const data = await response.json();
   return data.choices?.[0]?.message?.content;
-}
-
-// Call OpenRouter API
-async function callOpenRouter(article) {
-  if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY not set');
-
-  const cleanContent = cleanHtml(article.content);
-  const cleanTitle = cleanHtml(article.title);
-
-  const response = await fetch(OPENROUTER_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': 'https://terrortrackng.web.app',
-      'X-Title': 'Sentinel-NG Security Tracker',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.0-flash-exp:free',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Analyze this Nigerian news article:\n\nTitle: ${cleanTitle}\n\nContent: ${cleanContent}\n\nArticle Date: ${article.date}` }
-      ],
-      temperature: 0.1,
-      max_tokens: 2000,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content;
-}
-
-// Validate and fix state name
-function validateState(state) {
-  if (!state) return 'Unknown';
-  
-  const normalized = state.trim();
-  
-  // Direct match
-  if (NIGERIAN_STATES.includes(normalized)) return normalized;
-  
-  // Case-insensitive match
-  const found = NIGERIAN_STATES.find(s => s.toLowerCase() === normalized.toLowerCase());
-  if (found) return found;
-  
-  // Partial match
-  const partial = NIGERIAN_STATES.find(s => 
-    normalized.toLowerCase().includes(s.toLowerCase()) ||
-    s.toLowerCase().includes(normalized.toLowerCase())
-  );
-  if (partial) return partial;
-  
-  // Common aliases
-  const aliases = {
-    'fct': 'FCT',
-    'abuja': 'FCT',
-    'federal capital': 'FCT',
-    'niger state': 'Niger',
-    'rivers state': 'Rivers',
-    'delta state': 'Delta',
-  };
-  
-  const aliasMatch = aliases[normalized.toLowerCase()];
-  if (aliasMatch) return aliasMatch;
-  
-  return 'Unknown';
 }
 
 // Main classification function
@@ -238,13 +269,14 @@ export async function classifyWithChutes(article) {
   const provider = AI_PROVIDER.toLowerCase();
   const apiCall = provider === 'chutes' ? () => callChutes(article) : () => callOpenRouter(article);
   const providerName = provider === 'chutes' ? 'Chutes' : 'OpenRouter';
+  const articleText = `${article.title} ${article.content}`;
 
   try {
     let content = await retryWithBackoff(apiCall);
     
     if (!content) throw new Error(`Empty response from ${providerName}`);
 
-    // Strip markdown code blocks
+    // Strip markdown
     content = content.trim();
     if (content.startsWith('```json')) content = content.slice(7);
     else if (content.startsWith('```')) content = content.slice(3);
@@ -253,46 +285,36 @@ export async function classifyWithChutes(article) {
 
     const parsed = JSON.parse(content);
     
-    // Check if it's a new incident
-    if (!parsed.is_new_incident) {
-      const reason = parsed.rejection_reason || 'not a new incident';
-      console.log(`  ⊘ Skipped: ${reason}`);
+    // Check validity
+    if (!parsed.is_valid_incident) {
+      console.log(`  ⊘ Rejected: ${parsed.rejection_reason || 'not valid'}`);
       return null;
     }
 
-    // Check for follow-up articles
-    if (parsed.is_follow_up) {
-      console.log(`  ⊘ Skipped: follow-up article`);
-      return null;
-    }
-
-    // CRITICAL: Must have at least one casualty
+    // Must have casualties
     const totalCasualties = (parsed.fatalities || 0) + (parsed.injuries || 0) + (parsed.kidnapped || 0);
     if (totalCasualties === 0) {
-      console.log(`  ⊘ Skipped: no casualties (0/0/0)`);
+      console.log(`  ⊘ Rejected: no casualties`);
       return null;
     }
 
-    // Validate state
-    const state = validateState(parsed.state);
+    // Validate and fix state
+    const state = validateState(parsed.state, articleText);
+    if (state === 'Unknown') {
+      console.log(`  ⚠ Warning: Could not determine state`);
+    }
     
     // Get coordinates
     const coords = STATE_COORDS[state] || STATE_COORDS['FCT'];
-    const lat = coords.lat + (Math.random() - 0.5) * 0.3;
-    const lng = coords.lng + (Math.random() - 0.5) * 0.3;
-
-    // Clean the summary
-    const cleanSummary = cleanHtml(parsed.summary);
-
-    // Use incident_date if provided, otherwise article date
-    const incidentDate = parsed.incident_date || article.date || new Date().toISOString();
+    const lat = coords.lat + (Math.random() - 0.5) * 0.4;
+    const lng = coords.lng + (Math.random() - 0.5) * 0.4;
 
     return {
       title: cleanHtml(parsed.title) || cleanHtml(article.title).substring(0, 70),
-      description: cleanSummary || cleanHtml(article.content).substring(0, 200),
-      date: incidentDate,
+      description: cleanHtml(parsed.summary) || '',
+      date: parsed.incident_date || article.date || new Date().toISOString(),
       state: state,
-      lga: parsed.lga || parsed.town_village || 'Unknown',
+      lga: parsed.lga || 'Unknown',
       lat,
       lng,
       fatalities: Math.max(0, parseInt(parsed.fatalities) || 0),
@@ -309,39 +331,33 @@ export async function classifyWithChutes(article) {
   }
 }
 
-// Fallback classification without AI
+// Fallback classification
 function fallbackClassify(article) {
   const text = cleanHtml(`${article.title} ${article.content}`).toLowerCase();
   
-  // Skip releases/rescues
-  if (text.includes('released') || text.includes('freed') || text.includes('rescued') || text.includes('regain freedom')) {
-    console.log(`  ⊘ Skipped: release/rescue article`);
+  // Skip non-incidents
+  const skipPatterns = ['released', 'freed', 'rescued', 'arrest', 'condemn', 'react', 'vow', 'analysis'];
+  if (skipPatterns.some(p => text.includes(p)) && !text.includes('kill') && !text.includes('attack')) {
     return null;
   }
   
-  // Check if it's a security incident
-  const securityKeywords = ['kill', 'attack', 'kidnap', 'abduct', 'bandit', 'terrorist', 'gunmen', 'dead', 'shot', 'bomb', 'massacre'];
-  const isSecurityIncident = securityKeywords.some(kw => text.includes(kw));
-  
-  if (!isSecurityIncident) return null;
+  // Must be security related
+  const securityKeywords = ['kill', 'attack', 'kidnap', 'abduct', 'bandit', 'terrorist', 'gunmen', 'dead', 'shot', 'bomb'];
+  if (!securityKeywords.some(kw => text.includes(kw))) return null;
 
   // Extract state
-  let state = 'Unknown';
-  for (const s of NIGERIAN_STATES) {
-    if (text.includes(s.toLowerCase())) {
-      state = s;
-      break;
-    }
-  }
+  const state = extractStateFromText(text) || 'Unknown';
 
   // Extract numbers
-  const deathMatch = text.match(/(\d+)\s*(killed|dead|death|die)/);
+  const deathMatch = text.match(/(\d+)\s*(killed|dead|die)/);
   const kidnappedMatch = text.match(/(\d+)\s*(kidnapped|abducted|taken)/);
   const injuredMatch = text.match(/(\d+)\s*(injured|wounded)/);
 
   const fatalities = deathMatch ? parseInt(deathMatch[1]) : 0;
   const kidnapped = kidnappedMatch ? parseInt(kidnappedMatch[1]) : 0;
   const injuries = injuredMatch ? parseInt(injuredMatch[1]) : 0;
+
+  if (fatalities + kidnapped + injuries === 0) return null;
 
   // Classify type
   let incident_type = 'Unknown Gunmen';
@@ -351,18 +367,15 @@ function fallbackClassify(article) {
     incident_type = 'Banditry';
   } else if (text.includes('cult')) {
     incident_type = 'Cult Clash';
-  } else if (text.includes('police') || text.includes('army') || text.includes('troops')) {
-    incident_type = 'Police Clash';
   }
 
-  // Severity
   const total = fatalities + kidnapped + injuries;
   let severity = 'Low';
   if (fatalities >= 10 || total >= 30) severity = 'Critical';
   else if (fatalities >= 5 || total >= 15) severity = 'High';
   else if (fatalities >= 1 || total >= 5) severity = 'Medium';
 
-  const coords = STATE_COORDS[state] || STATE_COORDS['FCT'];
+  const coords = STATE_COORDS[state] || STATE_COORDS['Borno'];
 
   return {
     title: cleanHtml(article.title).substring(0, 70),
@@ -370,8 +383,8 @@ function fallbackClassify(article) {
     date: article.date || new Date().toISOString(),
     state,
     lga: 'Unknown',
-    lat: coords.lat + (Math.random() - 0.5) * 0.3,
-    lng: coords.lng + (Math.random() - 0.5) * 0.3,
+    lat: coords.lat + (Math.random() - 0.5) * 0.4,
+    lng: coords.lng + (Math.random() - 0.5) * 0.4,
     fatalities,
     injuries,
     kidnapped,

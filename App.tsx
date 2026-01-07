@@ -65,14 +65,23 @@ const App: React.FC = () => {
   const filteredIncidents = useMemo(() => {
     const now = new Date();
     let start = new Date(0);
+    let end = now;
+    
     switch (filters.dateRange) {
         case '24h': start = new Date(now.getTime() - 24 * 60 * 60 * 1000); break;
         case '7d': start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
         case '30d': start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); break;
+        case '3m': start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); break;
+        case '1y': start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); break;
+        case 'custom': 
+          if (filters.customDateStart) start = new Date(filters.customDateStart);
+          if (filters.customDateEnd) end = new Date(filters.customDateEnd + 'T23:59:59');
+          break;
         default: start = new Date(0); break;
     }
     return incidents.filter(inc => {
-      const matchesDate = new Date(inc.date) >= start;
+      const incDate = new Date(inc.date);
+      const matchesDate = incDate >= start && incDate <= end;
       const matchesState = filters.state === 'All' || inc.location.state === filters.state;
       const matchesSearch = inc.title.toLowerCase().includes(filters.searchQuery.toLowerCase()) || 
                            inc.location.lga.toLowerCase().includes(filters.searchQuery.toLowerCase());
@@ -156,17 +165,52 @@ const App: React.FC = () => {
              <div className="space-y-3">
                <div>
                   <label className="text-[9px] text-slate-500 font-mono uppercase tracking-widest mb-1.5 block">Timeframe</label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {['24h', '7d', 'all'].map(t => (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { value: '24h', label: '24H' },
+                      { value: '7d', label: '7D' },
+                      { value: '30d', label: '1M' },
+                      { value: '3m', label: '3M' },
+                      { value: '1y', label: '1Y' },
+                      { value: 'all', label: 'ALL' },
+                    ].map(t => (
                       <button 
-                        key={t}
-                        onClick={() => setFilters({...filters, dateRange: t as any})}
-                        className={`text-[9px] py-2 rounded font-bold border transition-all uppercase ${filters.dateRange === t ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm shadow-emerald-600/20' : 'bg-white dark:bg-slate-900/50 border-slate-200 dark:border-white/5 text-slate-500 hover:border-emerald-500/30 hover:text-slate-900 dark:hover:text-white'}`}
+                        key={t.value}
+                        onClick={() => setFilters({...filters, dateRange: t.value as any})}
+                        className={`text-[9px] py-2 rounded font-bold border transition-all uppercase ${filters.dateRange === t.value ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm shadow-emerald-600/20' : 'bg-white dark:bg-slate-900/50 border-slate-200 dark:border-white/5 text-slate-500 hover:border-emerald-500/30 hover:text-slate-900 dark:hover:text-white'}`}
                       >
-                        {t}
+                        {t.label}
                       </button>
                     ))}
                   </div>
+                  <button 
+                    onClick={() => setFilters({...filters, dateRange: 'custom'})}
+                    className={`w-full mt-1.5 text-[9px] py-2 rounded font-bold border transition-all uppercase ${filters.dateRange === 'custom' ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm shadow-emerald-600/20' : 'bg-white dark:bg-slate-900/50 border-slate-200 dark:border-white/5 text-slate-500 hover:border-emerald-500/30 hover:text-slate-900 dark:hover:text-white'}`}
+                  >
+                    Custom Range
+                  </button>
+                  {filters.dateRange === 'custom' && (
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <label className="text-[8px] text-slate-400 uppercase block mb-1">From</label>
+                        <input 
+                          type="date"
+                          value={filters.customDateStart || ''}
+                          onChange={(e) => setFilters({...filters, customDateStart: e.target.value})}
+                          className="w-full bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded py-1.5 px-2 text-[10px] text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] text-slate-400 uppercase block mb-1">To</label>
+                        <input 
+                          type="date"
+                          value={filters.customDateEnd || ''}
+                          onChange={(e) => setFilters({...filters, customDateEnd: e.target.value})}
+                          className="w-full bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded py-1.5 px-2 text-[10px] text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  )}
                </div>
                <div>
                   <label className="text-[9px] text-slate-500 font-mono uppercase tracking-widest mb-1.5 block">Severity</label>
